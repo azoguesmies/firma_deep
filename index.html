@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firma Electrónica Ecuador</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #1a1a2e; padding: 20px; }
+        .main-container { max-width: 1400px; margin: 0 auto; background: #16213e; border-radius: 12px; padding: 20px; }
+        h1 { color: #2c7da0; text-align: center; margin-bottom: 20px; }
+        .row { display: flex; gap: 20px; flex-wrap: wrap; }
+        .panel { flex: 1; min-width: 300px; background: #1e2a3e; border-radius: 10px; padding: 20px; }
+        .panel h3 { color: #2c7da0; margin-top: 15px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #2c7da0; }
+        .panel h3:first-of-type { margin-top: 0; }
+        button { width: 100%; padding: 12px; margin: 5px 0; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn-primary { background: #2c7da0; color: white; }
+        .btn-primary:hover { background: #1a5a7a; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-secondary { background: #555; color: white; }
+        input { width: 100%; padding: 10px; margin: 5px 0; border: none; border-radius: 6px; }
+        .info { background: #0f172a; padding: 10px; border-radius: 6px; margin-top: 10px; font-size: 12px; color: #aaa; word-break: break-all; }
+        .status { margin-top: 10px; padding: 10px; border-radius: 6px; text-align: center; display: none; }
+        .status.show { display: block; }
+        .status-success { background: #28a745; color: white; }
+        .status-error { background: #dc3545; color: white; }
+        .status-info { background: #2c7da0; color: white; }
+        .visor { flex: 2; background: #0f172a; border-radius: 10px; padding: 20px; position: relative; }
+        .canvas-container { position: relative; display: inline-block; }
+        #pdfCanvas { box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: crosshair; background: white; }
+        .preview-box { position: absolute; border: 2px solid #2c7da0; background: rgba(44,125,160,0.2); border-radius: 8px; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+        .preview-box span { background: #2c7da0; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+        .footer { text-align: center; font-size: 12px; color: #aaa; margin-top: 15px; }
+        .pos-info { background: #0f172a; margin-top: 10px; padding: 8px; border-radius: 6px; font-size: 11px; text-align: center; color: #2c7da0; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+</head>
+<body>
+<div class="main-container">
+    <h1>📄 FIRMA ELECTRÓNICA ECUADOR</h1>
+    <div class="row">
+        <div class="panel">
+            <h3>1. CERTIFICADO DIGITAL</h3>
+            <button id="btnCert" class="btn-primary">📁 Seleccionar certificado P12</button>
+            <input type="file" id="inputCert" accept=".p12,.pfx" style="display:none">
+            <div id="certNombre" class="info">Ningún certificado seleccionado</div>
+            
+            <h3>2. CONTRASEÑA</h3>
+            <input type="password" id="password" placeholder="Contraseña del certificado" disabled>
+            <button id="btnVerificar" class="btn-secondary" disabled>✓ Verificar certificado</button>
+            <div id="certInfo" class="info"></div>
+            
+            <h3>3. DOCUMENTO PDF</h3>
+            <button id="btnPdf" class="btn-primary" disabled>📄 Seleccionar PDF</button>
+            <input type="file" id="inputPdf" accept=".pdf" style="display:none">
+            <div id="pdfNombre" class="info">Ningún PDF seleccionado</div>
+            
+            <h3>4. POSICIÓN DE LA FIRMA</h3>
+            <div id="posInfo" class="pos-info">⚡ Haz clic en el PDF para colocar la firma</div>
+            <button id="btnPreview" class="btn-secondary" disabled>👁️ Vista previa</button>
+            <button id="btnFirmar" class="btn-success" disabled>🔐 FIRMAR DOCUMENTO</button>
+            <div id="status" class="status"></div>
+        </div>
+        
+        <div class="visor">
+            <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                <span>📄 VISUALIZADOR PDF</span>
+                <div>
+                    <button id="zoomOut" style="width:35px;">−</button>
+                    <span id="pageNum">0</span> / <span id="pageCount">0</span>
+                    <button id="zoomIn" style="width:35px;">+</button>
+                </div>
+            </div>
+            <div id="canvasContainer" class="canvas-container" style="position:relative; display:inline-block;">
+                <canvas id="pdfCanvas"></canvas>
+            </div>
+            <div class="footer">💡 INSTRUCCIÓN: Haz clic en cualquier parte del PDF para colocar la firma</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Configuración PDF.js
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    
+    const API_URL = 'http://localhost:8000';
+    
+    // Variables
+    let sessionId = null;
+    let pdfDoc = null;
+    let currentPage = 1;
+    let scale = 1.2;
+    let firmaPos = { x: 50, y: 80, page: 0 };
+    let canvas = document.getElementById('pdfCanvas');
+    let ctx = canvas.getContext('2d');
+    let canvasContainer = document.getElementById('canvasContainer');
+    
+    // Elementos
+    const btnCert = document.getElementById('btnCert');
+    const inputCert = document.getElementById('inputCert');
+    const certNombre = document.getElementById('certNombre');
+    const passwordInput = document.getElementById('password');
+    const btnVerificar = document.getElementById('btnVerificar');
+    const certInfo = document.getElementById('certInfo');
+    const btnPdf = document.getElementById('btnPdf');
+    const inputPdf = document.getElementById('inputPdf');
+    const pdfNombre = document.getElementById('pdfNombre');
+    const posInfo = document.getElementById('posInfo');
+    const btnPreview = document.getElementById('btnPreview');
+    const btnFirmar = document.getElementById('btnFirmar');
+    const statusDiv = document.getElementById('status');
+    const zoomIn = document.getElementById('zoomIn');
+    const zoomOut = document.getElementById('zoomOut');
+    const pageNumSpan = document.getElementById('pageNum');
+    const pageCountSpan = document.getElementById('pageCount');
+    
+    function showStatus(msg, type) {
+        statusDiv.textContent = msg;
+        statusDiv.className = `status show status-${type}`;
+        setTimeout(() => statusDiv.classList.remove('show'), 4000);
+    }
+    
+    async function renderPDF() {
+        if (!pdfDoc) return;
+        const page = await pdfDoc.getPage(currentPage);
+        const viewport = page.getViewport({ scale: scale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = 'auto';
+        canvas.style.height = 'auto';
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        pageNumSpan.textContent = currentPage;
+        showPreview();
+    }
+    
+    function showPreview() {
+        const old = document.getElementById('previewDiv');
+        if (old) old.remove();
+        if (!canvasContainer) return;
+        
+        const div = document.createElement('div');
+        div.id = 'previewDiv';
+        div.className = 'preview-box';
+        div.style.left = `${firmaPos.x * scale}px`;
+        div.style.bottom = `${firmaPos.y * scale}px`;
+        div.style.width = '280px';
+        div.style.height = '100px';
+        div.innerHTML = '<span>📍 Firma digital aquí</span>';
+        canvasContainer.appendChild(div);
+    }
+    
+    // ========== CERTIFICADO ==========
+    btnCert.onclick = () => inputCert.click();
+    
+    inputCert.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        certNombre.textContent = file.name;
+        certNombre.classList.add('success');
+        
+        const fd = new FormData();
+        fd.append('cert', file);
+        showStatus('Subiendo certificado...', 'info');
+        
+        try {
+            const res = await fetch(`${API_URL}/upload-cert`, { method: 'POST', body: fd });
+            const data = await res.json();
+            if (res.ok) {
+                sessionId = data.session_id;
+                showStatus('✅ Certificado cargado', 'success');
+                btnCert.textContent = '✅ Certificado cargado';
+                btnCert.style.background = '#28a745';
+                passwordInput.disabled = false;
+                btnVerificar.disabled = false;
+            } else {
+                showStatus('❌ Error al cargar', 'error');
+            }
+        } catch (err) {
+            showStatus('❌ Error de conexión', 'error');
+        }
+    };
+    
+    // ========== VERIFICAR CERTIFICADO ==========
+    btnVerificar.onclick = async () => {
+        const pwd = passwordInput.value;
+        if (!pwd) { showStatus('❌ Ingrese contraseña', 'error'); return; }
+        if (!sessionId) { showStatus('❌ Cargue certificado primero', 'error'); return; }
+        
+        showStatus('Verificando certificado...', 'info');
+        const fd = new FormData();
+        fd.append('session_id', sessionId);
+        fd.append('password', pwd);
+        
+        try {
+            const res = await fetch(`${API_URL}/verify-cert`, { method: 'POST', body: fd });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus(`✅ Certificado válido - ${data.firmante}`, 'success');
+                certInfo.innerHTML = `<strong>${data.firmante}</strong><br>Emisión: ${data.emision}<br>Expira: ${data.expiracion}<br>${data.vigente ? '✅ CERTIFICADO VIGENTE' : '❌ CERTIFICADO VENCIDO'} ${data.dias_restantes > 0 ? `(${data.dias_restantes} días)` : ''}`;
+                btnVerificar.textContent = '✅ Verificado';
+                btnVerificar.style.background = '#28a745';
+                btnPdf.disabled = false;
+            } else {
+                showStatus('❌ Contraseña incorrecta', 'error');
+                certInfo.innerHTML = '<span style="color:#dc3545">Contraseña incorrecta</span>';
+            }
+        } catch (err) {
+            showStatus('❌ Error de conexión', 'error');
+        }
+    };
+    
+    // ========== PDF ==========
+    btnPdf.onclick = () => inputPdf.click();
+    
+    inputPdf.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        pdfNombre.textContent = file.name;
+        pdfNombre.classList.add('success');
+        
+        if (!sessionId) { showStatus('❌ Cargue certificado primero', 'error'); return; }
+        
+        const fd = new FormData();
+        fd.append('pdf', file);
+        fd.append('session_id', sessionId);
+        showStatus('Subiendo PDF...', 'info');
+        
+        try {
+            const res = await fetch(`${API_URL}/upload-pdf`, { method: 'POST', body: fd });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus('✅ PDF cargado', 'success');
+                btnPdf.textContent = '✅ PDF cargado';
+                btnPdf.style.background = '#28a745';
+                
+                const arrayBuffer = await file.arrayBuffer();
+                pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                pageCountSpan.textContent = pdfDoc.numPages;
+                currentPage = 1;
+                await renderPDF();
+                
+                btnPreview.disabled = false;
+                btnFirmar.disabled = false;
+            } else {
+                showStatus('❌ Error al cargar PDF', 'error');
+            }
+        } catch (err) {
+            showStatus('❌ Error de conexión', 'error');
+        }
+    };
+    
+    // ========== POSICIÓN (CLICK EN CANVAS) ==========
+    canvas.onclick = async (e) => {
+        if (!pdfDoc) { showStatus('❌ Cargue un PDF primero', 'error'); return; }
+        
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        let x = (e.clientX - rect.left) * scaleX;
+        let y = canvas.height - ((e.clientY - rect.top) * scaleY);
+        x = Math.max(20, Math.min(x, canvas.width - 290));
+        y = Math.max(20, Math.min(y, canvas.height - 120));
+        
+        firmaPos = { x: x / scale, y: y / scale, page: currentPage - 1 };
+        posInfo.innerHTML = `📍 Posición: X=${Math.round(firmaPos.x)} | Y=${Math.round(firmaPos.y)} | Página=${currentPage}`;
+        posInfo.style.background = '#0f172a';
+        
+        showPreview();
+        
+        // Enviar posición al backend
+        const fd = new FormData();
+        fd.append('session_id', sessionId);
+        fd.append('x', firmaPos.x);
+        fd.append('y', firmaPos.y);
+        fd.append('page', firmaPos.page);
+        await fetch(`${API_URL}/set-position`, { method: 'POST', body: fd });
+    };
+    
+    // ========== ZOOM ==========
+    zoomIn.onclick = () => { scale = Math.min(scale + 0.2, 2.5); renderPDF(); };
+    zoomOut.onclick = () => { scale = Math.max(scale - 0.2, 0.6); renderPDF(); };
+    
+    // ========== VISTA PREVIA ==========
+    btnPreview.onclick = async () => {
+        if (!sessionId) { showStatus('❌ Cargue certificado primero', 'error'); return; }
+        if (!passwordInput.value) { showStatus('❌ Ingrese contraseña', 'error'); return; }
+        
+        showStatus('Generando vista previa...', 'info');
+        const fd = new FormData();
+        fd.append('session_id', sessionId);
+        fd.append('password', passwordInput.value);
+        
+        try {
+            const res = await fetch(`${API_URL}/preview-signature`, { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                const ventana = window.open('', '_blank', 'width=500,height=400');
+                ventana.document.write(`
+                    <html><head><title>Vista Previa Firma</title></head>
+                    <body style="display:flex; justify-content:center; align-items:center; height:100vh; background:#1a1a2e;">
+                        <div style="background:white; padding:20px; border-radius:10px;">
+                            <img src="${data.image}" style="max-width:100%;">
+                            <p style="text-align:center; margin-top:15px;">Posición confirmada: X=${Math.round(firmaPos.x)} Y=${Math.round(firmaPos.y)}</p>
+                        </div>
+                    </body></html>
+                `);
+                showStatus('Vista previa generada', 'success');
+            }
+        } catch (err) {
+            showStatus('Error en vista previa', 'error');
+        }
+    };
+    
+    // ========== FIRMAR ==========
+    btnFirmar.onclick = async () => {
+        if (!sessionId) { showStatus('❌ Sesión inválida', 'error'); return; }
+        if (!passwordInput.value) { showStatus('❌ Ingrese contraseña', 'error'); return; }
+        
+        btnFirmar.disabled = true;
+        btnFirmar.textContent = '⏳ Firmando documento...';
+        showStatus('Aplicando firma digital... Esto puede tomar unos segundos', 'info');
+        
+        try {
+            const res = await fetch(`${API_URL}/sign`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    password: passwordInput.value,
+                    position: firmaPos
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus('✅ Documento firmado exitosamente. Descargando...', 'success');
+                window.open(`${API_URL}/download/${sessionId}`, '_blank');
+                btnFirmar.textContent = '✅ FIRMADO';
+                btnFirmar.style.background = '#28a745';
+            } else {
+                showStatus(`❌ Error: ${data.error || data.detail || 'Error al firmar'}`, 'error');
+                btnFirmar.disabled = false;
+                btnFirmar.textContent = '🔐 FIRMAR DOCUMENTO';
+            }
+        } catch (err) {
+            showStatus('❌ Error de conexión con el servidor', 'error');
+            btnFirmar.disabled = false;
+            btnFirmar.textContent = '🔐 FIRMAR DOCUMENTO';
+        }
+    };
+    
+    // Verificar backend
+    async function checkBackend() {
+        try {
+            const res = await fetch(`${API_URL}/`);
+            if (res.ok) console.log('✅ Backend conectado');
+            else showStatus('⚠️ Backend no responde', 'error');
+        } catch {
+            showStatus('⚠️ Backend no disponible. Ejecute: python api_firma.py', 'error');
+        }
+    }
+    checkBackend();
+</script>
+</body>
+</html>
